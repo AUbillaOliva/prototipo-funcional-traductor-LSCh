@@ -1,22 +1,23 @@
 import React from "react";
 import {
-  NavbarContainer,
-  NavbarLink,
-  NavbarLinks,
-  NavbarLogo,
+  NavbarContainer as Navbar,
+  NavbarLinks as Nav,
+  NavLink
 } from "./navbar.styled";
 
-const Navbar = () => {
+const NavbarComponent = () => {
   return (
-    <NavbarContainer>
-      <NavbarLogo href="/">Prototipo Funcional Transcriptor LSCh</NavbarLogo>
-      <NavbarLinks>
-        <NavbarLink href="/">Inicio</NavbarLink>
-        <NavbarLink href="/acerca">Acerca de</NavbarLink>
-        <NavbarLink href="/contacto">Contacto</NavbarLink>
-      </NavbarLinks>
-    </NavbarContainer>
+    <Navbar expand="lg" className="bg-body-tertiary">
+      <Navbar.Brand href="/">Transcriptor LSCh</Navbar.Brand>
+      <Navbar.Toggle aria-controls="basic-navbar-nav" />
+      <Navbar.Collapse>
+        <Nav>
+          <NavLink href="/">Inicio</NavLink>
+          <NavLink href="/acerca">Acerca de</NavLink>
+        </Nav>
+      </Navbar.Collapse>
+    </Navbar>
   );
 };
 
-export default Navbar;
+export default NavbarComponent;

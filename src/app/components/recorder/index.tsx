@@ -1,8 +1,10 @@
-import React from "react";
+import React, { useState } from "react";
 import { UseRecordWebcam, useRecordWebcam } from "react-record-webcam";
 import { RecorderContainer } from "./recorder.styled";
+import { Button } from "react-bootstrap";
 
 const Recorder = () => {
+  const [isRecording, setIsRecording] = useState(false);
   const {
     createRecording,
     openCamera,
@@ -13,12 +15,14 @@ const Recorder = () => {
   }: UseRecordWebcam = useRecordWebcam();
 
   const recordVideo = async () => {
+    setIsRecording(true);
     const recording: any = await createRecording();
     await openCamera(recording.id);
     await startRecording(recording.id);
     await new Promise((resolve) => setTimeout(resolve, 3000)); // Record for 3 seconds
     await stopRecording(recording.id);
     await download(recording.id);
+    setIsRecording(false);
 
     // Get download file
     const downloadFile = recording.blob;
@@ -31,11 +35,23 @@ const Recorder = () => {
 
   return (
     <RecorderContainer>
-      <button onClick={recordVideo}>Grabar Video</button>
+      <div className="col">
+        <div className="row">
+          <Button onClick={recordVideo}>Grabar</Button>
+        </div>
+      </div>
       {activeRecordings.map((recording) => (
         <div key={recording.id}>
-          <video ref={recording.webcamRef} autoPlay />
-          <video ref={recording.previewRef} autoPlay loop />
+          {
+            recording.webcamRef !== null && (
+              <video id="recorder-player" ref={recording.webcamRef} autoPlay />
+            )
+          }
+          {
+            recording.previewRef !== null && (
+              <video id="preview-player" ref={recording.previewRef} autoPlay loop />
+            )
+          }
         </div>
       ))}
     </RecorderContainer>

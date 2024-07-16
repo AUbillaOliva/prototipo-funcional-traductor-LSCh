@@ -1,12 +1,17 @@
 "use client";
-import Navbar from "./components/navbar";
-import Recorder from "./components/recorder";
+import { Container } from "@components/container";
+import Navbar from "@components/navbar";
+import Recorder from "@components/recorder";
+import 'bootstrap/dist/css/bootstrap.min.css';
 
 export default function Home() {
   return (
-    <div>
+    <>
       <Navbar />
-      <Recorder />
-    </div>
+      <Container>
+        <p>Lorem Ipsum</p>
+        <Recorder />
+      </Container>
+    </>
   );
 }

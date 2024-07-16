@@ -1,199 +1,139 @@
-<<<<<<< HEAD
-import React, { useEffect, useRef, useState } from "react";
-import { UseRecordWebcam, useRecordWebcam } from "react-record-webcam";
-import { RecorderContainer } from "./recorder.styled";
-import * as tf from "@tensorflow/tfjs";
-import { getModelData } from "@/app/helpers/api.helper";
+import React, { useEffect, useRef } from "react";
+import Webcam from "react-webcam";
+import { Camera } from "@mediapipe/camera_utils";
 import {
-  GestureRecognizer,
-  FilesetResolver,
-  DrawingUtils,
-} from "@mediapipe/tasks-vision";
+  FACEMESH_TESSELATION,
+  HAND_CONNECTIONS,
+  Holistic,
+  Results,
+} from "@mediapipe/holistic";
+import { drawConnectors, drawLandmarks } from "@mediapipe/drawing_utils";
 
-const Recorder = () => {
-  const {
-    createRecording,
-    openCamera,
-    startRecording,
-    stopRecording,
-    download,
-    activeRecordings,
-  }: UseRecordWebcam = useRecordWebcam();
+function Recorder() {
+  const webcamRef = useRef<Webcam>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  const [model, setModel] = useState(null);
-  const [downloadFile, setDownloadFile] = useState(null);
-  const videoRef = useRef(null);
-  const [gestureRecognizer, setGestureRecognizer] = useState<any>(null);
-  const [webcamRunning, setWebcamRunning] = useState(false);
+  const onResults = (results: Results) => {
+    if (!webcamRef.current?.video || !canvasRef.current) return;
+    const videoWidth = webcamRef.current.video.videoWidth;
+    const videoHeight = webcamRef.current.video.videoHeight;
+    canvasRef.current.width = videoWidth;
+    canvasRef.current.height = videoHeight;
 
-  const recordVideo = async () => {
-    const recording: any = await createRecording();
-    await openCamera(recording.id);
-    await startRecording(recording.id);
-    await new Promise((resolve) => setTimeout(resolve, 3000)); // Record for 3 seconds
-    await stopRecording(recording.id);
-    await download(recording.id);
+    const canvasElement = canvasRef.current;
+    const canvasCtx = canvasElement.getContext("2d");
+    if (canvasCtx == null) throw new Error("Could not get context");
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
-    // Get download file
-    setDownloadFile(recording.blob);
-  };
+    // Only overwrite existing pixels.
+    canvasCtx.globalCompositeOperation = "source-in";
+    canvasCtx.fillRect(0, 0, canvasElement.width, canvasElement.height);
 
-  useEffect(() => {
-    getModelData().then((loadedModel: any) => {
-      setModel(loadedModel);
-      console.log("Model loaded:", loadedModel);
+    // Only overwrite missing pixels.
+    canvasCtx.globalCompositeOperation = "destination-atop";
+    canvasCtx.drawImage(
+      results.image,
+      0,
+      0,
+      canvasElement.width,
+      canvasElement.height
+    );
+
+    canvasCtx.globalCompositeOperation = "source-over";
+    // drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS,
+    //   {color: '#00FF00', lineWidth: 4});
+    // drawLandmarks(canvasCtx, results.poseLandmarks,
+    //   {color: '#FF0000', lineWidth: 2});
+    drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_TESSELATION, {
+      color: "#C0C0C070",
+      lineWidth: 1,
     });
-
-    const createGestureRecognizer = async () => {
-      const vision = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
-      );
-      const recognizer: any = await GestureRecognizer.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task",
-          delegate: "GPU",
-        },
-        runningMode: "IMAGE",
-      });
-      setGestureRecognizer(recognizer);
-    };
-
-    createGestureRecognizer();
-  }, []);
+    drawConnectors(canvasCtx, results.leftHandLandmarks, HAND_CONNECTIONS, {
+      color: "#CC0000",
+      lineWidth: 5,
+    });
+    drawLandmarks(canvasCtx, results.leftHandLandmarks, {
+      color: "#00FF00",
+      lineWidth: 2,
+    });
+    drawConnectors(canvasCtx, results.rightHandLandmarks, HAND_CONNECTIONS, {
+      color: "#00CC00",
+      lineWidth: 5,
+    });
+    drawLandmarks(canvasCtx, results.rightHandLandmarks, {
+      color: "#FF0000",
+      lineWidth: 2,
+    });
+    canvasCtx.restore();
+  };
 
   useEffect(() => {
-    if (downloadFile && model && gestureRecognizer) {
-      processVideoWithMediaPipe(downloadFile);
+    const holistic = new Holistic({
+      locateFile: (file: string) => {
+        return `https://cdn.jsdelivr.net/npm/@mediapipe/holistic/${file}`;
+      },
+    });
+    holistic.setOptions({
+      selfieMode: true,
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      enableSegmentation: true,
+      smoothSegmentation: true,
+      refineFaceLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+    });
+    holistic.onResults(onResults);
+
+    if (
+      typeof webcamRef.current !== "undefined" &&
+      webcamRef.current !== null
+    ) {
+      if (!webcamRef.current?.video) return;
+      const camera = new Camera(webcamRef.current.video, {
+        onFrame: async () => {
+          if (!webcamRef.current?.video) return;
+          await holistic.send({ image: webcamRef.current.video });
+        },
+        width: 640,
+        height: 480,
+      });
+      camera.start();
     }
-  }, [downloadFile, model, gestureRecognizer]);
-
-  const processVideoWithMediaPipe = async (videoBlob: any) => {
-    const video = document.createElement("video");
-    video.src = URL.createObjectURL(videoBlob);
-    video.width = 640;
-    video.height = 480;
-    video.muted = true;
-
-    let landmarksData: any = [];
-
-    const onResults = (results: any) => {
-      if (results.landmarks) {
-        for (const landmarks of results.landmarks) {
-          landmarksData.push(landmarks);
-        }
-      }
-    };
-
-    video.onloadeddata = () => {
-      video.play();
-      const interval = setInterval(async () => {
-        if (gestureRecognizer) {
-          const nowInMs = Date.now();
-          const results = await gestureRecognizer.recognizeForVideo(
-            video,
-            nowInMs
-          );
-          onResults(results);
-        }
-      }, 100); // Process frame every 100ms
-
-      video.onended = () => {
-        clearInterval(interval);
-        video.remove();
-        if (landmarksData.length > 0) {
-          // Format landmarks data to match model input shape
-          const formattedData = formatLandmarksData(landmarksData);
-          // Make predictions with the model
-          const prediction = (model as any).predict(tf.tensor(formattedData));
-          console.log("Prediction:", prediction);
-        }
-      };
-    };
-  };
-
-  const formatLandmarksData = (landmarksData: any) => {
-    // Here, we need to reshape and format the landmarks data
-    // to match the input shape (346, 258, 3) required by the model
-    // This is a placeholder function and needs proper implementation
-    // based on the exact structure of landmarksData and model requirements.
-    return landmarksData;
-  };
-
+  }, []);
   return (
-    <RecorderContainer>
-      <button onClick={recordVideo}>Grabar Video</button>
-      {activeRecordings.map((recording) => (
-        <div key={recording.id}>
-          <video ref={recording.webcamRef} autoPlay />
-          <video ref={recording.previewRef} autoPlay loop />
-        </div>
-      ))}
-    </RecorderContainer>
+    <div className="App">
+      <Webcam
+        ref={webcamRef}
+        style={{
+          position: "absolute",
+          marginLeft: "auto",
+          marginRight: "auto",
+          left: 0,
+          right: 0,
+          textAlign: "center",
+          zIndex: 9,
+          width: 1200,
+          height: 800,
+        }}
+      />
+      <canvas
+        ref={canvasRef}
+        style={{
+          position: "absolute",
+          marginLeft: "auto",
+          marginRight: "auto",
+          left: 0,
+          right: 0,
+          textAlign: "center",
+          zIndex: 9,
+          width: 1200,
+          height: 800,
+        }}
+      />
+    </div>
   );
-};
+}
 
 export default Recorder;
-=======
-import React, { useState } from "react";
-import { UseRecordWebcam, useRecordWebcam } from "react-record-webcam";
-import { RecorderContainer } from "./recorder.styled";
-import { Button } from "react-bootstrap";
-
-const Recorder = () => {
-  const [isRecording, setIsRecording] = useState(false);
-  const {
-    createRecording,
-    openCamera,
-    startRecording,
-    stopRecording,
-    download,
-    activeRecordings,
-  }: UseRecordWebcam = useRecordWebcam();
-
-  const recordVideo = async () => {
-    setIsRecording(true);
-    const recording: any = await createRecording();
-    await openCamera(recording.id);
-    await startRecording(recording.id);
-    await new Promise((resolve) => setTimeout(resolve, 3000)); // Record for 3 seconds
-    await stopRecording(recording.id);
-    await download(recording.id);
-    setIsRecording(false);
-
-    // Get download file
-    const downloadFile = recording.blob;
-
-    // Pass to tensorflow model
-    // const model = await tf.loadLayersModel('model.json');
-    // const prediction = model.predict(downloadFile);
-    // console.log(prediction);
-  };
-
-  return (
-    <RecorderContainer>
-      <div className="col">
-        <div className="row">
-          <Button onClick={recordVideo}>Grabar</Button>
-        </div>
-      </div>
-      {activeRecordings.map((recording) => (
-        <div key={recording.id}>
-          {
-            recording.webcamRef !== null && (
-              <video id="recorder-player" ref={recording.webcamRef} autoPlay />
-            )
-          }
-          {
-            recording.previewRef !== null && (
-              <video id="preview-player" ref={recording.previewRef} autoPlay loop />
-            )
-          }
-        </div>
-      ))}
-    </RecorderContainer>
-  );
-};
-
-export default Recorder;
->>>>>>> be26078cd14cbd45465677265b6eee87a8dd73e2

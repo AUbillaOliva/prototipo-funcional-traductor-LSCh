@@ -1,17 +1,27 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Webcam from "react-webcam";
 import { Camera } from "@mediapipe/camera_utils";
 import {
-  FACEMESH_TESSELATION,
   HAND_CONNECTIONS,
   Holistic,
+  POSE_CONNECTIONS,
   Results,
 } from "@mediapipe/holistic";
 import { drawConnectors, drawLandmarks } from "@mediapipe/drawing_utils";
+import * as tf from "@tensorflow/tfjs";
+
+const MAX_SEQUENCE_LENGTH = 346;
+const NUM_FEATURES = 258;
+
+interface LandmarksData {
+  landmarks: number[];
+}
 
 function Recorder() {
   const webcamRef = useRef<Webcam>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [landmarksData, setLandmarksData] = useState<LandmarksData[]>([]);
+  const [model, setModel] = useState<tf.LayersModel | null>(null);
 
   const onResults = (results: Results) => {
     if (!webcamRef.current?.video || !canvasRef.current) return;
@@ -41,13 +51,13 @@ function Recorder() {
     );
 
     canvasCtx.globalCompositeOperation = "source-over";
-    // drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS,
-    //   {color: '#00FF00', lineWidth: 4});
-    // drawLandmarks(canvasCtx, results.poseLandmarks,
-    //   {color: '#FF0000', lineWidth: 2});
-    drawConnectors(canvasCtx, results.faceLandmarks, FACEMESH_TESSELATION, {
-      color: "#C0C0C070",
-      lineWidth: 1,
+    drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, {
+      color: "#00FF00",
+      lineWidth: 4,
+    });
+    drawLandmarks(canvasCtx, results.poseLandmarks, {
+      color: "#FF0000",
+      lineWidth: 2,
     });
     drawConnectors(canvasCtx, results.leftHandLandmarks, HAND_CONNECTIONS, {
       color: "#CC0000",
@@ -66,6 +76,58 @@ function Recorder() {
       lineWidth: 2,
     });
     canvasCtx.restore();
+
+    // Extract landmarks
+    const landmarks = extractLandmarks(results);
+
+    if (landmarksData.length < MAX_SEQUENCE_LENGTH) {
+      setLandmarksData((prevData) => [...prevData, { landmarks }]);
+    }
+  };
+
+  const extractLandmarks = (results: Results) => {
+    const pose = results.poseLandmarks
+      ? results.poseLandmarks
+          .map((res) => [res.x, res.y, res.z, res.visibility])
+          .flat()
+      : new Array(33 * 4).fill(0);
+
+    const lh = results.leftHandLandmarks
+      ? results.leftHandLandmarks.map((res) => [res.x, res.y, res.z]).flat()
+      : new Array(21 * 3).fill(0);
+
+    const rh = results.rightHandLandmarks
+      ? results.rightHandLandmarks.map((res) => [res.x, res.y, res.z]).flat()
+      : new Array(21 * 3).fill(0);
+
+    return [...pose, ...lh, ...rh];
+  };
+
+  const prepareData = () => {
+    // Ensure we have the correct number of frames
+    while (landmarksData.length < MAX_SEQUENCE_LENGTH) {
+      landmarksData.push({ landmarks: new Array(NUM_FEATURES).fill(0) });
+    }
+
+    // Truncate excess frames
+    const truncatedData = landmarksData.slice(0, MAX_SEQUENCE_LENGTH);
+
+    // Convert landmarksData to the shape (346, 258, 3)
+    const data = truncatedData.map((frame) => frame.landmarks);
+
+    // Flatten the data to match the total element count
+    const flattenedData = data.flat();
+
+    // Make sure the flattened data has the correct number of elements
+    if (flattenedData.length !== MAX_SEQUENCE_LENGTH * NUM_FEATURES) {
+      console.error(
+        `Expected ${MAX_SEQUENCE_LENGTH * NUM_FEATURES} elements but got ${
+          flattenedData.length
+        }`
+      );
+    }
+
+    return tf.tensor(flattenedData, [MAX_SEQUENCE_LENGTH, NUM_FEATURES]);
   };
 
   useEffect(() => {
@@ -86,15 +148,12 @@ function Recorder() {
     });
     holistic.onResults(onResults);
 
-    if (
-      typeof webcamRef.current !== "undefined" &&
-      webcamRef.current !== null
-    ) {
-      if (!webcamRef.current?.video) return;
+    if (webcamRef.current !== null && webcamRef.current.video !== null) {
       const camera = new Camera(webcamRef.current.video, {
         onFrame: async () => {
-          if (!webcamRef.current?.video) return;
-          await holistic.send({ image: webcamRef.current.video });
+          if (webcamRef.current?.video) {
+            await holistic.send({ image: webcamRef.current.video });
+          }
         },
         width: 640,
         height: 480,
@@ -102,6 +161,35 @@ function Recorder() {
       camera.start();
     }
   }, []);
+
+  useEffect(() => {
+    if (landmarksData.length === MAX_SEQUENCE_LENGTH) {
+      const inputData = prepareData();
+
+      console.log(landmarksData);
+      console.log(inputData);
+
+      if (model) {
+        const prediction = model.predict(inputData) as tf.Tensor;
+        console.log(prediction);
+      }
+    }
+  }, [landmarksData]);
+
+  useEffect(() => {
+    // Load your model here
+    const loadModel = async () => {
+      const loadedModel = await tf.loadLayersModel(
+        "https://prototipo-lsch.s3.us-east-2.amazonaws.com/model/model.json",
+      );
+      setModel(loadedModel);
+    };
+
+    console.log(tf.version.tfjs);
+
+    loadModel();
+  }, []);
+
   return (
     <div className="App">
       <Webcam
